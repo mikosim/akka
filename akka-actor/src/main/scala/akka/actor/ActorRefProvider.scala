@@ -735,9 +735,16 @@ private[akka] class LocalActorRefProvider private[akka] (
         if (!system.dispatchers.hasDispatcher(d.routerConfig.routerDispatcher))
           throw new ConfigurationException(s"Dispatcher [${p.dispatcher}] not configured for router of $path")
 
+        // FIXME #3549
+        val useRouter2 = d.routerConfig.isInstanceOf[akka.routing2.RouterConfig2]
+
         val routerProps =
-          Props(p.deploy.copy(dispatcher = p.routerConfig.routerDispatcher),
-            classOf[RoutedActorCell.RouterCreator], Vector(p.routerConfig))
+          if (useRouter2)
+            Props(p.deploy.copy(dispatcher = p.routerConfig.routerDispatcher),
+              classOf[akka.routing2.RoutedActorCell.RouterActorCreator], Vector(p.routerConfig))
+          else
+            Props(p.deploy.copy(dispatcher = p.routerConfig.routerDispatcher),
+              classOf[RoutedActorCell.RouterCreator], Vector(p.routerConfig))
         val routeeProps = p.withRouter(NoRouter)
 
         try {
@@ -749,7 +756,10 @@ private[akka] class LocalActorRefProvider private[akka] (
           val routeeDispatcher = system.dispatchers.lookup(p.dispatcher)
           val routeeMailbox = system.mailboxes.getMailboxType(routeeProps, routeeDispatcher.configurator.config)
 
-          new RoutedActorRef(system, routerProps, routerDispatcher, routerMailbox, routeeProps, supervisor, path).initialize(async)
+          if (useRouter2)
+            new akka.routing2.RoutedActorRef(system, routerProps, routerDispatcher, routerMailbox, routeeProps, supervisor, path).initialize(async)
+          else
+            new RoutedActorRef(system, routerProps, routerDispatcher, routerMailbox, routeeProps, supervisor, path).initialize(async)
         } catch {
           case NonFatal(e) ⇒ throw new ConfigurationException(
             s"configuration problem while creating [$path] with router dispatcher [${routerProps.dispatcher}] and mailbox [${routerProps.mailbox}] " +

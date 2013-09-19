@@ -208,7 +208,7 @@ trait RouterConfig {
   /**
    * The router "head" actor.
    */
-  def createActor(): Router = new Router {
+  def createActor(): Actor = new Router {
     override def supervisorStrategy: SupervisorStrategy = RouterConfig.this.supervisorStrategy
   }
 
