@@ -250,7 +250,7 @@ case class DefaultResizer(
 
 }
 
-trait Resizable extends RouterConfig2 {
+trait Resizable extends RouterConfig2 { this: CreateChildRoutee ⇒
   // FIXME #3549 signature clash with old resizer method
   def resizer2: Option[Resizer]
 
@@ -278,6 +278,7 @@ private[akka] final class ResizableRoutedActorCell(
   val resizer: Resizer)
   extends RoutedActorCell(_system, _ref, _routerProps, _routerDispatcher, _routeeProps, _supervisor) {
 
+  private val childFactory = _routerProps.routerConfig.asInstanceOf[CreateChildRoutee]
   private val resizeInProgress = new AtomicBoolean
   private val resizeCounter = new AtomicLong
 
@@ -289,16 +290,21 @@ private[akka] final class ResizableRoutedActorCell(
   }
 
   override def sendMessage(envelope: Envelope): Unit = {
-    if (resizer.isTimeForResize(resizeCounter.getAndIncrement()) && resizeInProgress.compareAndSet(false, true))
+    if (!targetSelf(envelope.message) &&
+      resizer.isTimeForResize(resizeCounter.getAndIncrement()) && resizeInProgress.compareAndSet(false, true)) {
       super.sendMessage(Envelope(RouterActorWithResizer.Resize, self, system))
+    }
     super.sendMessage(envelope)
   }
+
+  println("# Resizer active")
 
   private[akka] def resize(initial: Boolean): Unit = {
     if (resizeInProgress.get || initial) try {
       val requestedCapacity = resizer.resize(router.routees)
+      println("# resize: " + resizeCounter.get + " => " + router.routees.size + " + " + requestedCapacity)
       if (requestedCapacity > 0) {
-        val newRoutees = immutable.IndexedSeq.fill(requestedCapacity)(ActorRefRoutee(this.actorOf(routeeProps)))
+        val newRoutees = immutable.IndexedSeq.fill(requestedCapacity)(childFactory.newRoutee(routeeProps, this))
         // FIXME #3549 watch newRoutees
         _router = _router.withRoutees(_router.routees ++ newRoutees)
       } else if (requestedCapacity < 0) {

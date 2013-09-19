@@ -17,6 +17,7 @@ import akka.japi.Util.immutableSeq
 import scala.collection.immutable
 import java.util.concurrent.atomic.AtomicInteger
 import java.lang.IllegalStateException
+import akka.actor.Actor
 
 /**
  * [[akka.routing.RouterConfig]] implementation for remote deployment on defined
@@ -37,7 +38,7 @@ final case class RemoteRouterConfig(local: RouterConfig, nodes: Iterable[Address
     local.createRoute(routeeProvider)
   }
 
-  override def createActor(): Router = local.createActor()
+  override def createActor(): Actor = local.createActor()
 
   override def supervisorStrategy: SupervisorStrategy = local.supervisorStrategy
 

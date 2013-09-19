@@ -14,6 +14,7 @@ import akka.actor.OneForOneStrategy
 import akka.ConfigurationException
 import akka.actor.ActorPath
 import akka.actor.Actor
+import akka.routing.RouterConfig
 
 trait RoutingLogic {
   def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee
@@ -48,6 +49,31 @@ final class Router(val routees: immutable.IndexedSeq[Routee], val logic: Routing
 
   def withRoutees(rs: immutable.IndexedSeq[Routee]): Router = new Router(rs, logic)
 
+}
+
+/**
+ * INTERNAL API
+ *
+ * Used to override unset configuration in a router.
+ */
+private[akka] trait OverrideUnsetConfig[T <: RouterConfig2 with Resizable] extends RouterConfig2 with CreateChildRoutee with Resizable {
+
+  final def overrideUnsetConfig(other: RouterConfig): RouterConfig =
+    if (other == NoRouter) this // NoRouter is the default, hence “neutral”
+    else {
+      val wssConf: OverrideUnsetConfig[T] =
+        if ((this.supervisorStrategy eq RouterConfig2.defaultSupervisorStrategy)
+          && (other.supervisorStrategy ne RouterConfig2.defaultSupervisorStrategy))
+          this.withSupervisorStrategy(other.supervisorStrategy).asInstanceOf[OverrideUnsetConfig[T]]
+        else this
+      // FIXME #3549 cleanup  
+      if (wssConf.resizer2.isEmpty && other.isInstanceOf[Resizable] && other.asInstanceOf[Resizable].resizer2.isDefined) wssConf.withResizer(other.asInstanceOf[Resizable].resizer2.get)
+      else wssConf
+    }
+
+  def withSupervisorStrategy(strategy: SupervisorStrategy): T
+
+  def withResizer(resizer: Resizer): T
 }
 
 /**
@@ -106,10 +132,6 @@ case object NoRouter extends NoRouter {
    * Java API: get the singleton instance
    */
   def getInstance = this
-}
-
-trait CreateInitialChildRoutees {
-  def nrOfInstances: Int
 }
 
 /**

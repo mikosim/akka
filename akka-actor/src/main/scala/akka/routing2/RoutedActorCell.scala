@@ -17,6 +17,7 @@ import akka.actor.Terminated
 import akka.dispatch.Envelope
 import akka.dispatch.MessageDispatcher
 import akka.routing.RouterConfig
+import akka.actor.ActorContext
 
 /**
  * INTERNAL API
@@ -56,9 +57,9 @@ private[akka] class RoutedActorCell(
   override def start(): this.type = {
     // create the initial routees before scheduling the Router actor
     _router = routerConfig match {
-      case init: CreateInitialChildRoutees ⇒
+      case c: CreateChildRoutee ⇒
         val r = routerConfig.createRouter()
-        val routees = immutable.IndexedSeq.fill(init.nrOfInstances)(ActorRefRoutee(this.actorOf(routeeProps)))
+        val routees = immutable.IndexedSeq.fill(c.nrOfInstances)(c.newRoutee(routeeProps, this))
         r.withRoutees(routees)
       case _ ⇒ routerConfig.createRouter()
     }
@@ -86,13 +87,15 @@ private[akka] class RoutedActorCell(
    * message has been sent.
    */
   override def sendMessage(envelope: Envelope): Unit = {
-    envelope.message match {
-      case _: AutoReceivedMessage | _: Terminated | _: RouterManagementMesssage ⇒
-        super.sendMessage(envelope)
-      case msg ⇒
-        router.route(msg, envelope.sender)
-    }
+    if (targetSelf(envelope.message))
+      super.sendMessage(envelope)
+    else
+      router.route(envelope.message, envelope.sender)
+  }
 
+  protected def targetSelf(msg: Any): Boolean = msg match {
+    case _: AutoReceivedMessage | _: Terminated | _: RouterManagementMesssage ⇒ true
+    case _ ⇒ false
   }
 
 }
@@ -118,4 +121,14 @@ private[akka] class RouterActor extends Actor {
   override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {
     // do not scrap children
   }
+}
+
+trait CreateChildRoutee {
+  /**
+   * Initial number of routee instances
+   */
+  def nrOfInstances: Int
+
+  def newRoutee(routeeProps: Props, context: ActorContext): Routee =
+    ActorRefRoutee(context.actorOf(routeeProps))
 }

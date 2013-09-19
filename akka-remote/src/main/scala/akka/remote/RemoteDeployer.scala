@@ -9,6 +9,8 @@ import akka.remote.routing._
 import akka.ConfigurationException
 import akka.japi.Util.immutableSeq
 import com.typesafe.config._
+import akka.routing2.RouterConfig2
+import akka.routing2.CreateChildRoutee
 
 @SerialVersionUID(1L)
 case class RemoteScope(node: Address) extends Scope {
@@ -30,7 +32,16 @@ private[akka] class RemoteDeployer(_settings: ActorSystem.Settings, _pm: Dynamic
           case _ ⇒
             val nodes = immutableSeq(deploy.config.getStringList("target.nodes")).map(AddressFromURIString(_))
             if (nodes.isEmpty || deploy.routerConfig == NoRouter) d
-            else Some(deploy.copy(routerConfig = RemoteRouterConfig(deploy.routerConfig, nodes)))
+            else deploy.routerConfig match {
+              case r: RouterConfig2 with CreateChildRoutee ⇒
+                Some(deploy.copy(routerConfig = akka.remote.routing2.RemoteRouterConfig(r, nodes)))
+              case r: RouterConfig2 ⇒
+                // FIXME #3549 can this happen?
+                throw new IllegalArgumentException("Unexpected RouterConfig type: " + r.getClass.getName)
+              case old ⇒
+                // FIXME #3549 temporary
+                Some(deploy.copy(routerConfig = RemoteRouterConfig(deploy.routerConfig, nodes)))
+            }
         }
       case None ⇒ None
     }

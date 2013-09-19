@@ -33,11 +33,6 @@ trait RouterConfig2 extends RouterConfig {
     override def supervisorStrategy: SupervisorStrategy = RouterConfig2.this.supervisorStrategy
   }
 
-  override def supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy
-
-  // FIXME #3549 routerDispatcher and supervisorStrategy in constructor of RouterConfig2 subclasses
-  override def routerDispatcher: String = Dispatchers.DefaultDispatcherId
-
   override def withFallback(other: RouterConfig): RouterConfig = this
 
   override def resizer: Option[akka.routing.Resizer] = ???

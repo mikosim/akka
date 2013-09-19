@@ -9,6 +9,8 @@ import akka.actor.ActorContext
 import akka.actor.Props
 import akka.dispatch.Dispatchers
 import com.typesafe.config.Config
+import akka.actor.SupervisorStrategy
+import akka.routing.RouterConfig
 
 object RandomRoutingLogic {
   def apply(): RandomRoutingLogic = new RandomRoutingLogic
@@ -20,8 +22,11 @@ class RandomRoutingLogic extends RoutingLogic {
     else routees(ThreadLocalRandom.current.nextInt(routees.size))
 }
 
-case class RandomRouter(override val nrOfInstances: Int, override val resizer2: Option[Resizer] = None)
-  extends RouterConfig2 with CreateInitialChildRoutees with Resizable {
+final case class RandomRouter(
+  override val nrOfInstances: Int, override val resizer2: Option[Resizer] = None,
+  override val supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy,
+  override val routerDispatcher: String = Dispatchers.DefaultDispatcherId)
+  extends RouterConfig2 with CreateChildRoutee with Resizable with OverrideUnsetConfig[RandomRouter] {
 
   def this(config: Config) =
     this(
@@ -31,6 +36,20 @@ case class RandomRouter(override val nrOfInstances: Int, override val resizer2: 
   override def createRouter(): Router =
     new Router(Vector.empty, RandomRoutingLogic())
 
-  // FIXME #3549 routerDispatcher and supervisorStrategy in constructor
-  override def routerDispatcher: String = Dispatchers.DefaultDispatcherId
+  /**
+   * Uses the resizer and/or the supervisor strategy of the given Routerconfig
+   * if this RouterConfig doesn't have one, i.e. the resizer defined in code is used if
+   * resizer was not defined in config.
+   */
+  override def withFallback(other: RouterConfig): RouterConfig = this.overrideUnsetConfig(other)
+
+  /**
+   * Setting the supervisor strategy to be used for the “head” Router actor.
+   */
+  def withSupervisorStrategy(strategy: SupervisorStrategy): RandomRouter = copy(supervisorStrategy = strategy)
+
+  /**
+   * Setting the resizer to be used.
+   */
+  def withResizer(resizer: Resizer): RandomRouter = copy(resizer2 = Some(resizer))
 }
