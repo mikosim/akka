@@ -132,6 +132,7 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
 
   import scala.collection.JavaConverters._
 
+  private val resizerEnabled: Config = ConfigFactory.parseString("resizer.enabled=on")
   private val deployments = new AtomicReference(WildcardTree[Deploy]())
   private val config = settings.config.getConfig("akka.actor.deployment")
   protected val default = config.getConfig("default")
@@ -192,8 +193,14 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
       createOldRouterConfig(routerType, key, config, deployment)
 
   private def createNewRouterConfig(routerType: String, key: String, config: Config, deployment: Config): RouterConfig = {
+    // need this for backwards compatibility, resizer enabled when including (parts of) resizer section in the deployment
+    val deployment2 =
+      if (config.hasPath("resizer") && !deployment.getBoolean("resizer.enabled"))
+        resizerEnabled.withFallback(deployment)
+      else deployment
+
     val fqn = routerTypeMapping.getOrElse(routerType, routerType)
-    val args = List(classOf[Config] -> deployment)
+    val args = List(classOf[Config] -> deployment2)
     dynamicAccess.createInstanceFor[RouterConfig](fqn, args).recover({
       case exception ⇒ throw new IllegalArgumentException(
         ("Cannot instantiate router [%s], defined in [%s], " +

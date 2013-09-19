@@ -13,6 +13,7 @@ import akka.actor.SupervisorStrategy
 import akka.actor.OneForOneStrategy
 import akka.ConfigurationException
 import akka.actor.ActorPath
+import akka.actor.Actor
 
 trait RoutingLogic {
   def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee
@@ -37,13 +38,15 @@ case class SeveralRoutees(routees: immutable.IndexedSeq[Routee]) extends Routee 
     routees.foreach(_.send(message, sender))
 }
 
-class Router(routees: immutable.IndexedSeq[Routee], logic: RoutingLogic) {
+final class Router(val routees: immutable.IndexedSeq[Routee], val logic: RoutingLogic) {
 
   def route(message: Any, sender: ActorRef): Unit =
     message match {
       case akka.routing.Broadcast(msg) ⇒ SeveralRoutees(routees).send(msg, sender)
       case msg                         ⇒ logic.select(msg, routees).send(msg, sender)
     }
+
+  def withRoutees(rs: immutable.IndexedSeq[Routee]): Router = new Router(rs, logic)
 
 }
 
@@ -72,7 +75,7 @@ class FromConfig(override val routerDispatcher: String = Dispatchers.DefaultDisp
 
   def this() = this(Dispatchers.DefaultDispatcherId, RouterConfig2.defaultSupervisorStrategy)
 
-  override def createRouter(context: ActorContext, routeeProps: Props): Router =
+  override def createRouter(): Router =
     throw new UnsupportedOperationException("FromConfig must not create Router")
 
   override def verifyConfig(path: ActorPath): Unit =
@@ -94,8 +97,7 @@ class FromConfig(override val routerDispatcher: String = Dispatchers.DefaultDisp
 @SerialVersionUID(1L)
 abstract class NoRouter extends RouterConfig2
 case object NoRouter extends NoRouter {
-  override def createRouter(context: ActorContext, routeeProps: Props): Router =
-    throw new UnsupportedOperationException("NoRouter has no Router")
+  override def createRouter(): Router = throw new UnsupportedOperationException("NoRouter has no Router")
   override def routerDispatcher: String = throw new UnsupportedOperationException("NoRouter has no dispatcher")
   override def supervisorStrategy = throw new UnsupportedOperationException("NoRouter has no strategy")
   override def withFallback(other: akka.routing.RouterConfig): akka.routing.RouterConfig = other
@@ -104,4 +106,36 @@ case object NoRouter extends NoRouter {
    * Java API: get the singleton instance
    */
   def getInstance = this
+}
+
+trait CreateInitialChildRoutees {
+  def nrOfInstances: Int
+}
+
+/**
+ * Sending this message to a router will make it send back its currently used routees.
+ * A RouterRoutees message is sent asynchronously to the "requester" containing information
+ * about what routees the router is routing over.
+ */
+abstract class CurrentRoutees extends RouterManagementMesssage
+@SerialVersionUID(1L)
+case object CurrentRoutees extends CurrentRoutees {
+  /**
+   * Java API: get the singleton instance
+   */
+  def getInstance = this
+}
+
+/**
+ * Message used to carry information about what routees the router is currently using.
+ */
+@SerialVersionUID(1L)
+case class RouterRoutees(routees: immutable.IndexedSeq[Routee]) {
+  /**
+   * Java API
+   */
+  def getRoutees: java.util.List[Routee] = {
+    import scala.collection.JavaConverters._
+    routees.asJava
+  }
 }

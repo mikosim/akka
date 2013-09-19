@@ -20,15 +20,16 @@ class RandomRoutingLogic extends RoutingLogic {
     else routees(ThreadLocalRandom.current.nextInt(routees.size))
 }
 
-case class RandomRouter(nrOfInstances: Int) extends RouterConfig2 {
+case class RandomRouter(override val nrOfInstances: Int, override val resizer2: Option[Resizer] = None)
+  extends RouterConfig2 with CreateInitialChildRoutees with Resizable {
 
   def this(config: Config) =
-    this(config.getInt("nr-of-instances"))
+    this(
+      nrOfInstances = config.getInt("nr-of-instances"),
+      resizer2 = DefaultResizer.fromConfig(config))
 
-  override def createRouter(context: ActorContext, routeeProps: Props): Router = {
-    val routees = immutable.IndexedSeq.fill(nrOfInstances)(ActorRefRoutee(context.actorOf(routeeProps)))
-    new Router(routees, RandomRoutingLogic())
-  }
+  override def createRouter(): Router =
+    new Router(Vector.empty, RandomRoutingLogic())
 
   // FIXME #3549 routerDispatcher and supervisorStrategy in constructor
   override def routerDispatcher: String = Dispatchers.DefaultDispatcherId

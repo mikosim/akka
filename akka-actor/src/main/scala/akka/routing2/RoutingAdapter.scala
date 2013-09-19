@@ -8,11 +8,11 @@ import akka.actor.Props
 import akka.routing.Route
 import akka.actor.ActorContext
 import akka.routing.RouteeProvider
-import akka.routing.Resizer
 import akka.actor.ActorPath
 import akka.actor.SupervisorStrategy
 import akka.actor.Actor
 import akka.actor.OneForOneStrategy
+import akka.dispatch.Dispatchers
 
 object RouterConfig2 {
   val defaultSupervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
@@ -23,7 +23,7 @@ object RouterConfig2 {
 // FIXME #3549
 trait RouterConfig2 extends RouterConfig {
 
-  def createRouter(context: ActorContext, routeeProps: Props): Router
+  def createRouter(): Router
 
   override def createRoute(routeeProvider: RouteeProvider): Route = ???
 
@@ -35,11 +35,12 @@ trait RouterConfig2 extends RouterConfig {
 
   override def supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy
 
-  override def routerDispatcher: String = ???
+  // FIXME #3549 routerDispatcher and supervisorStrategy in constructor of RouterConfig2 subclasses
+  override def routerDispatcher: String = Dispatchers.DefaultDispatcherId
 
   override def withFallback(other: RouterConfig): RouterConfig = this
 
-  override def resizer: Option[Resizer] = ???
+  override def resizer: Option[akka.routing.Resizer] = ???
 
   override def verifyConfig(path: ActorPath): Unit = ()
 
