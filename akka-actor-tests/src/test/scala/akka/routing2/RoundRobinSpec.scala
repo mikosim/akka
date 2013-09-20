@@ -6,13 +6,18 @@ package akka.routing2
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.Await
 import scala.concurrent.duration._
-import akka.actor.{ Props, Actor }
-import akka.testkit.{ TestLatch, ImplicitSender, DefaultTimeout, AkkaSpec }
+import akka.actor.Props
+import akka.actor.Actor
+import akka.testkit._
 import akka.pattern.ask
 import akka.actor.Terminated
+import akka.actor.ActorRef
 
 @org.junit.runner.RunWith(classOf[org.scalatest.junit.JUnitRunner])
 class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
+
+  def routeeSize(router: ActorRef): Int =
+    Await.result(router ? CurrentRoutees, remaining).asInstanceOf[RouterRoutees].routees.size
 
   "round robin pool" must {
 
@@ -89,6 +94,24 @@ class RoundRobinSpec extends AkkaSpec with DefaultTimeout with ImplicitSender {
 
       system.stop(actor)
       Await.ready(stopLatch, 5 seconds)
+    }
+
+    "be controlled with management messages" in {
+      val actor = system.actorOf(Props(new Actor {
+        def receive = Actor.emptyBehavior
+      }).withRouter(RoundRobinPool(3)), "round-robin-managed")
+
+      routeeSize(actor) must be(3)
+      actor ! AdjustPoolSize(+4)
+      routeeSize(actor) must be(7)
+      actor ! AdjustPoolSize(-2)
+      routeeSize(actor) must be(5)
+
+      val other = ActorSelectionRoutee(system.actorSelection("/user/other"))
+      actor ! AddRoutee(other)
+      routeeSize(actor) must be(6)
+      actor ! RemoveRoutee(other)
+      routeeSize(actor) must be(5)
     }
   }
 

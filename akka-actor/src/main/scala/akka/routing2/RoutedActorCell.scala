@@ -18,6 +18,7 @@ import akka.dispatch.Envelope
 import akka.dispatch.MessageDispatcher
 import akka.routing.RouterConfig
 import akka.actor.ActorContext
+import akka.actor.PoisonPill
 
 /**
  * INTERNAL API
@@ -84,7 +85,7 @@ private[akka] class RoutedActorCell(
   }
 
   private def stopIfChild(routee: Routee): Unit = routee match {
-    case ActorRefRoutee(ref) if child(ref.path.name).isDefined ⇒ stop(ref)
+    case ActorRefRoutee(ref) if child(ref.path.name).isDefined ⇒ ref ! PoisonPill
     case _ ⇒
   }
 
@@ -150,11 +151,29 @@ private[akka] class RouterActor extends Actor {
   def receive = {
     case Terminated(child) ⇒
       cell.removeRoutee(ActorRefRoutee(child), stopChild = false)
-      if (cell.router.routees.isEmpty && cell.routerConfig.stopRouterWhenAllRouteesRemoved)
-        context.stop(self)
+      stopIfAllRouteesRemoved()
     case CurrentRoutees ⇒
       sender ! RouterRoutees(cell.router.routees)
+    case AddRoutee(routee) ⇒
+      cell.addRoutee(routee)
+    case RemoveRoutee(routee) ⇒
+      cell.removeRoutee(routee, stopChild = true)
+      stopIfAllRouteesRemoved()
+    case AdjustPoolSize(change: Int) if cell.routerConfig.isInstanceOf[Pool] ⇒
+      val pool = cell.routerConfig.asInstanceOf[Pool] // FIXME #3549 should we have a separate Pool actor?
+      if (change > 0) {
+        val newRoutees = Vector.fill(change)(pool.newRoutee(cell.routeeProps, context))
+        cell.addRoutees(newRoutees)
+      } else if (change < 0) {
+        val currentRoutees = cell.router.routees
+        val abandon = currentRoutees.drop(currentRoutees.length + change)
+        cell.removeRoutees(abandon, stopChild = true)
+      }
   }
+
+  def stopIfAllRouteesRemoved(): Unit =
+    if (cell.router.routees.isEmpty && cell.routerConfig.stopRouterWhenAllRouteesRemoved)
+      context.stop(self)
 
   override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {
     // do not scrap children

@@ -243,16 +243,16 @@ case object NoRouter extends NoRouter {
 /**
  * INTERNAL API
  */
-private[akka] trait RouterManagementMesssage
+@SerialVersionUID(1L) private[akka] trait RouterManagementMesssage
 
 /**
  * Sending this message to a router will make it send back its currently used routees.
  * A RouterRoutees message is sent asynchronously to the "requester" containing information
  * about what routees the router is routing over.
  */
-abstract class CurrentRoutees extends RouterManagementMesssage
-@SerialVersionUID(1L)
-case object CurrentRoutees extends CurrentRoutees {
+@SerialVersionUID(1L) abstract class CurrentRoutees extends RouterManagementMesssage
+
+@SerialVersionUID(1L) case object CurrentRoutees extends CurrentRoutees {
   /**
    * Java API: get the singleton instance
    */
@@ -272,3 +272,12 @@ case class RouterRoutees(routees: immutable.IndexedSeq[Routee]) {
     routees.asJava
   }
 }
+
+@SerialVersionUID(1L)
+case class AddRoutee(routee: Routee) extends RouterManagementMesssage
+
+@SerialVersionUID(1L)
+case class RemoveRoutee(routee: Routee) extends RouterManagementMesssage
+
+@SerialVersionUID(1L)
+case class AdjustPoolSize(change: Int) extends RouterManagementMesssage

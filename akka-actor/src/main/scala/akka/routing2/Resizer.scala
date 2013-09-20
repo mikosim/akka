@@ -293,6 +293,7 @@ private[akka] final class ResizablePoolCell(
         val currentRoutees = router.routees
         val abandon = currentRoutees.drop(currentRoutees.length + requestedCapacity)
 
+        // FIXME #3549 do we need delayedStop?
         delayedStop(abandon)
         removeRoutees(abandon, stopChild = false)
       }
