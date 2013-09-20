@@ -135,6 +135,7 @@ case class ClusterRouterSettings private[akka] (
   if (isRouteesPathDefined && maxInstancesPerNode != 1)
     throw new IllegalArgumentException("maxInstancesPerNode of cluster router must be 1 when routeesPath is defined")
 
+  // FIXME #3549 remove
   val routeesPathElements: immutable.Iterable[String] = routeesPath match {
     case RelativeActorPath(elements) ⇒ elements
     case _ ⇒

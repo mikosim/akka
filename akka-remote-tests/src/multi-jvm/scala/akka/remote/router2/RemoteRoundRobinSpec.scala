@@ -25,7 +25,7 @@ import scala.concurrent.duration._
 import akka.routing2.Routee
 import akka.routing.FromConfig
 
-object RemoteRoundRobinRouterMultiJvmSpec extends MultiNodeConfig {
+object RemoteRoundRobinMultiJvmSpec extends MultiNodeConfig {
 
   class SomeActor extends Actor {
     def receive = {
@@ -70,14 +70,14 @@ object RemoteRoundRobinRouterMultiJvmSpec extends MultiNodeConfig {
     """)
 }
 
-class RemoteRoundRobinRouterMultiJvmNode1 extends RemoteRoundRobinRouterSpec
-class RemoteRoundRobinRouterMultiJvmNode2 extends RemoteRoundRobinRouterSpec
-class RemoteRoundRobinRouterMultiJvmNode3 extends RemoteRoundRobinRouterSpec
-class RemoteRoundRobinRouterMultiJvmNode4 extends RemoteRoundRobinRouterSpec
+class RemoteRoundRobinMultiJvmNode1 extends RemoteRoundRobinSpec
+class RemoteRoundRobinMultiJvmNode2 extends RemoteRoundRobinSpec
+class RemoteRoundRobinMultiJvmNode3 extends RemoteRoundRobinSpec
+class RemoteRoundRobinMultiJvmNode4 extends RemoteRoundRobinSpec
 
-class RemoteRoundRobinRouterSpec extends MultiNodeSpec(RemoteRoundRobinRouterMultiJvmSpec)
+class RemoteRoundRobinSpec extends MultiNodeSpec(RemoteRoundRobinMultiJvmSpec)
   with STMultiNodeSpec with ImplicitSender with DefaultTimeout {
-  import RemoteRoundRobinRouterMultiJvmSpec._
+  import RemoteRoundRobinMultiJvmSpec._
 
   def initialParticipants = 4
 

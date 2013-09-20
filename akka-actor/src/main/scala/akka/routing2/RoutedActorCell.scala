@@ -33,11 +33,6 @@ private[akka] object RoutedActorCell {
 /**
  * INTERNAL API
  */
-private[akka] trait RouterManagementMesssage
-
-/**
- * INTERNAL API
- */
 private[akka] class RoutedActorCell(
   _system: ActorSystemImpl,
   _ref: InternalActorRef,
@@ -51,25 +46,62 @@ private[akka] class RoutedActorCell(
   private[akka] val routerConfig = _routerProps.routerConfig.asInstanceOf[RouterConfig2]
 
   @volatile
-  protected var _router: Router = null // initialized in start
+  private var _router: Router = null // initialized in start, and then only updated from the actor
   def router: Router = _router
+
+  def addRoutee(routee: Routee): Unit = {
+    watch(routee)
+    _router = _router.addRoutee(routee)
+  }
+
+  def addRoutees(routees: immutable.Iterable[Routee]): Unit = {
+    routees foreach watch
+    val r = _router
+    _router = r.withRoutees(r.routees ++ routees)
+  }
+
+  def removeRoutee(routee: Routee, stopChild: Boolean): Unit = {
+    _router = _router.removeRoutee(routee)
+    unwatch(routee)
+    if (stopChild) stopIfChild(routee)
+  }
+
+  def removeRoutees(routees: immutable.Iterable[Routee], stopChild: Boolean): Unit = {
+    val r = _router
+    val newRoutees = routees.foldLeft(r.routees) { (xs, x) ⇒ unwatch(x); xs.filterNot(_ == x) }
+    _router = r.withRoutees(newRoutees)
+    if (stopChild) routees foreach stopIfChild
+  }
+
+  // FIXME #3549 stopRouterWhenAllRouteesRemoved
+
+  private def watch(routee: Routee): Unit = routee match {
+    case ActorRefRoutee(ref) ⇒ watch(ref)
+    case _                   ⇒
+  }
+
+  private def unwatch(routee: Routee): Unit = routee match {
+    case ActorRefRoutee(ref) ⇒ unwatch(ref)
+    case _                   ⇒
+  }
+
+  private def stopIfChild(routee: Routee): Unit = routee match {
+    case ActorRefRoutee(ref) if child(ref.path.name).isDefined ⇒ stop(ref)
+    case _ ⇒
+  }
 
   override def start(): this.type = {
     // create the initial routees before scheduling the Router actor
-    _router = routerConfig match {
+    _router = routerConfig.createRouter()
+    routerConfig match {
       case pool: Pool ⇒
-        val r = routerConfig.createRouter()
         if (pool.nrOfInstances > 0)
-          r.withRoutees(Vector.fill(pool.nrOfInstances)(pool.newRoutee(routeeProps, this)))
-        else r
+          addRoutees(Vector.fill(pool.nrOfInstances)(pool.newRoutee(routeeProps, this)))
       case nozzle: Nozzle ⇒
-        val r = routerConfig.createRouter()
         val paths = nozzle.paths
-        if (paths.nonEmpty) {
-          val routees: Vector[Routee] = paths.map(p ⇒ nozzle.routeeFor(p, this))(collection.breakOut)
-          r.withRoutees(routees)
-        } else r
-      case _ ⇒ routerConfig.createRouter()
+        if (paths.nonEmpty)
+          addRoutees(paths.map(p ⇒ nozzle.routeeFor(p, this))(collection.breakOut))
+      case _ ⇒
     }
     preSuperStart()
     super.start()
@@ -99,15 +131,10 @@ private[akka] class RoutedActorCell(
    * message has been sent.
    */
   override def sendMessage(envelope: Envelope): Unit = {
-    if (targetSelf(envelope.message))
+    if (routerConfig.isManagementMessage(envelope.message))
       super.sendMessage(envelope)
     else
       router.route(envelope.message, envelope.sender)
-  }
-
-  protected def targetSelf(msg: Any): Boolean = msg match {
-    case _: AutoReceivedMessage | _: Terminated | _: RouterManagementMesssage ⇒ true
-    case _ ⇒ false
   }
 
 }
@@ -123,11 +150,10 @@ private[akka] class RouterActor extends Actor {
   }
 
   def receive = {
-    // FIXME #3549 watch/remove routee, stopRouterWhenAllRouteesRemoved
     case Terminated(child) ⇒
+      cell.removeRoutee(ActorRefRoutee(child), stopChild = false)
     case CurrentRoutees ⇒
       sender ! RouterRoutees(cell.router.routees)
-
   }
 
   override def preRestart(cause: Throwable, msg: Option[Any]): Unit = {

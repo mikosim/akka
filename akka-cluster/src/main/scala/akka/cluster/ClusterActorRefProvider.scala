@@ -33,6 +33,11 @@ import akka.cluster.routing.MetricsSelector
 import akka.dispatch.sysmsg.SystemMessage
 import akka.actor.ActorRef
 import akka.actor.Props
+import akka.routing2.Pool
+import akka.routing2.Nozzle
+import akka.cluster.routing2.ClusterPool
+import akka.cluster.routing2.ClusterNozzle
+import com.typesafe.config.ConfigFactory
 
 /**
  * INTERNAL API
@@ -83,7 +88,13 @@ private[akka] class ClusterActorRefProvider(
  */
 private[akka] class ClusterDeployer(_settings: ActorSystem.Settings, _pm: DynamicAccess) extends RemoteDeployer(_settings, _pm) {
   override def parseConfig(path: String, config: Config): Option[Deploy] = {
-    super.parseConfig(path, config) match {
+
+    // FIXME #3549 horrible hack to make it select Nozzle even though routees.paths is not defined (backwards compatibility)
+    val config2 =
+      if (config.hasPath("cluster.routees-path")) config.withFallback(ConfigFactory.parseString("routees.paths=[dummy]"))
+      else config
+
+    super.parseConfig(path, config2) match {
       case d @ Some(deploy) ⇒
         if (deploy.config.getBoolean("cluster.enabled")) {
           if (deploy.scope != NoScopeGiven)
@@ -99,8 +110,18 @@ private[akka] class ClusterDeployer(_settings: ActorSystem.Settings, _pm: Dynami
             routeesPath = deploy.config.getString("cluster.routees-path"),
             useRole = useRoleOption(deploy.config.getString("cluster.use-role")))
 
-          Some(deploy.copy(
-            routerConfig = ClusterRouterConfig(deploy.routerConfig, clusterRouterSettings), scope = ClusterScope))
+          deploy.routerConfig match {
+            case r: Pool ⇒
+              Some(deploy.copy(
+                routerConfig = ClusterPool(r, clusterRouterSettings), scope = ClusterScope))
+            case r: Nozzle ⇒
+              Some(deploy.copy(
+                routerConfig = ClusterNozzle(r, clusterRouterSettings), scope = ClusterScope))
+            case old ⇒
+              // FIXME #3549 temporary  
+              Some(deploy.copy(
+                routerConfig = ClusterRouterConfig(deploy.routerConfig, clusterRouterSettings), scope = ClusterScope))
+          }
         } else d
       case None ⇒ None
     }

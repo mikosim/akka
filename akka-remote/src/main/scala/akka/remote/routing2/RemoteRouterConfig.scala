@@ -21,8 +21,14 @@ import akka.routing2.Resizer
 import akka.routing.RouterConfig
 import akka.routing2.Pool
 
-final case class RemoteRouterConfig(local: Pool, nodes: Iterable[Address])
-  extends Pool {
+/**
+ * [[akka.routing.RouterConfig]] implementation for remote deployment on defined
+ * target nodes. Delegates other duties to the local [[akka.routing.RouterConfig]],
+ * which makes it possible to mix this with the built-in routers such as
+ * [[akka.routing.RoundRobinRouter]] or custom routers.
+ */
+@SerialVersionUID(1L)
+final case class RemoteRouterConfig(local: Pool, nodes: Iterable[Address]) extends Pool {
 
   require(nodes.nonEmpty, "Must specify list of remote target.nodes")
 

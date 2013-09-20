@@ -276,9 +276,9 @@ private[akka] final class ResizablePoolCell(
   }
 
   override def sendMessage(envelope: Envelope): Unit = {
-    if (!targetSelf(envelope.message) &&
+    if (!routerConfig.isManagementMessage(envelope.message) &&
       resizer.isTimeForResize(resizeCounter.getAndIncrement()) && resizeInProgress.compareAndSet(false, true)) {
-      super.sendMessage(Envelope(RouterActorWithResizer.Resize, self, system))
+      super.sendMessage(Envelope(ResizablePoolActor.Resize, self, system))
     }
     super.sendMessage(envelope)
   }
@@ -287,17 +287,14 @@ private[akka] final class ResizablePoolCell(
     if (resizeInProgress.get || initial) try {
       val requestedCapacity = resizer.resize(router.routees)
       if (requestedCapacity > 0) {
-        val newRoutees = immutable.IndexedSeq.fill(requestedCapacity)(pool.newRoutee(routeeProps, this))
-        // FIXME #3549 watch newRoutees
-        _router = _router.withRoutees(_router.routees ++ newRoutees)
+        val newRoutees = Vector.fill(requestedCapacity)(pool.newRoutee(routeeProps, this))
+        addRoutees(newRoutees)
       } else if (requestedCapacity < 0) {
-        val currentRoutees = _router.routees
+        val currentRoutees = router.routees
         val abandon = currentRoutees.drop(currentRoutees.length + requestedCapacity)
 
         delayedStop(abandon)
-        // FIXME #3549 unwatch removed routees
-        val newRoutees = abandon.foldLeft(currentRoutees) { (xs, x) ⇒ /*unwatch(x);*/ xs.filterNot(_ == x) }
-        _router = _router.withRoutees(newRoutees)
+        removeRoutees(abandon, stopChild = false)
       }
     } finally resizeInProgress.set(false)
   }
@@ -324,15 +321,15 @@ private[akka] final class ResizablePoolCell(
 /**
  * INTERNAL API
  */
-private[akka] object RouterActorWithResizer {
+private[akka] object ResizablePoolActor {
   case object Resize extends RouterManagementMesssage
 }
 
 /**
  * INTERNAL API
  */
-private[akka] class RouterActorWithResizer extends RouterActor {
-  import RouterActorWithResizer._
+private[akka] class ResizablePoolActor extends RouterActor {
+  import ResizablePoolActor._
 
   val resizerCell = context match {
     case x: ResizablePoolCell ⇒ x

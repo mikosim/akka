@@ -4,56 +4,53 @@
 package akka.routing2
 
 import scala.collection.immutable
-import java.util.concurrent.atomic.AtomicLong
-import akka.actor.ActorRef
-import akka.actor.ActorContext
-import akka.actor.Props
-import akka.dispatch.Dispatchers
-import akka.actor.SupervisorStrategy
-import akka.actor.OneForOneStrategy
 import akka.ConfigurationException
-import akka.actor.ActorPath
 import akka.actor.Actor
+import akka.actor.ActorContext
+import akka.actor.ActorPath
+import akka.actor.AutoReceivedMessage
+import akka.actor.OneForOneStrategy
+import akka.actor.Props
+import akka.actor.SupervisorStrategy
+import akka.actor.Terminated
+import akka.dispatch.Dispatchers
+import akka.routing.Route
+import akka.routing.RouteeProvider
 import akka.routing.RouterConfig
-import akka.actor.ActorSelection
 
-trait RoutingLogic {
-  def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee
+object RouterConfig2 {
+  val defaultSupervisorStrategy: SupervisorStrategy = OneForOneStrategy() {
+    case _ ⇒ SupervisorStrategy.Escalate
+  }
 }
 
-trait Routee {
-  def send(message: Any, sender: ActorRef): Unit
-}
+// FIXME #3549 this will be the new RouterConfig
+trait RouterConfig2 extends RouterConfig {
 
-case class ActorRefRoutee(ref: ActorRef) extends Routee {
-  override def send(message: Any, sender: ActorRef): Unit =
-    ref.tell(message, sender)
-}
+  def createRouter(): Router
 
-case class ActorSelectionRoutee(selection: ActorSelection) extends Routee {
-  override def send(message: Any, sender: ActorRef): Unit =
-    selection.tell(message, sender)
-}
+  // FIXME #3549 change signature to `createRouterActor: RouterActor`
+  override def createActor(): Actor = new RouterActor {
+    override def supervisorStrategy: SupervisorStrategy = RouterConfig2.this.supervisorStrategy
+  }
 
-object NoRoutee extends Routee {
-  // TODO #3549 not deadLetters any more?
-  override def send(message: Any, sender: ActorRef): Unit = ()
-}
+  /**
+   * Is the message handled by the router actor
+   */
+  def isManagementMessage(msg: Any): Boolean = msg match {
+    case _: AutoReceivedMessage | _: Terminated | _: RouterManagementMesssage ⇒ true
+    case _ ⇒ false
+  }
 
-case class SeveralRoutees(routees: immutable.IndexedSeq[Routee]) extends Routee {
-  override def send(message: Any, sender: ActorRef): Unit =
-    routees.foreach(_.send(message, sender))
-}
+  override def withFallback(other: RouterConfig): RouterConfig = this
 
-final class Router(val routees: immutable.IndexedSeq[Routee], val logic: RoutingLogic) {
+  override def verifyConfig(path: ActorPath): Unit = ()
 
-  def route(message: Any, sender: ActorRef): Unit =
-    message match {
-      case akka.routing.Broadcast(msg) ⇒ SeveralRoutees(routees).send(msg, sender)
-      case msg                         ⇒ logic.select(msg, routees).send(msg, sender)
-    }
-
-  def withRoutees(rs: immutable.IndexedSeq[Routee]): Router = new Router(rs, logic)
+  // FIXME #3549 remove these 
+  override def createRoute(routeeProvider: RouteeProvider): Route = ???
+  override def createRouteeProvider(context: ActorContext, routeeProps: Props): RouteeProvider = ???
+  override def resizer: Option[akka.routing.Resizer] = ???
+  override def stopRouterWhenAllRouteesRemoved: Boolean = ???
 
 }
 
@@ -131,7 +128,7 @@ trait Pool extends RouterConfig2 {
   override def createActor(): Actor =
     resizer2 match {
       case Some(r) ⇒
-        new RouterActorWithResizer {
+        new ResizablePoolActor {
           override def supervisorStrategy: SupervisorStrategy = super.supervisorStrategy
         }
       case _ ⇒ super.createActor()
@@ -195,6 +192,11 @@ case object NoRouter extends NoRouter {
    */
   def getInstance = this
 }
+
+/**
+ * INTERNAL API
+ */
+private[akka] trait RouterManagementMesssage
 
 /**
  * Sending this message to a router will make it send back its currently used routees.
