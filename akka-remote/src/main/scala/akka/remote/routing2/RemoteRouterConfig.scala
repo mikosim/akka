@@ -4,7 +4,6 @@
 package akka.remote.routing2
 
 import akka.routing2.RouterConfig2
-import akka.routing2.CreateChildRoutee
 import akka.routing2.Router
 import akka.actor.Props
 import akka.actor.ActorContext
@@ -18,12 +17,12 @@ import akka.routing2.ActorRefRoutee
 import akka.remote.RemoteScope
 import akka.actor.Actor
 import akka.actor.SupervisorStrategy
-import akka.routing2.Resizable
 import akka.routing2.Resizer
 import akka.routing.RouterConfig
+import akka.routing2.Pool
 
-final case class RemoteRouterConfig(local: RouterConfig2 with CreateChildRoutee, nodes: Iterable[Address])
-  extends RouterConfig2 with CreateChildRoutee with Resizable {
+final case class RemoteRouterConfig(local: Pool, nodes: Iterable[Address])
+  extends Pool {
 
   require(nodes.nonEmpty, "Must specify list of remote target.nodes")
 
@@ -54,18 +53,15 @@ final case class RemoteRouterConfig(local: RouterConfig2 with CreateChildRoutee,
 
   override def routerDispatcher: String = local.routerDispatcher
 
-  override def resizer2: Option[Resizer] = local match {
-    case r: Resizable ⇒ r.resizer2
-    case _            ⇒ None
-  }
+  override def resizer2: Option[Resizer] = local.resizer2
 
   override def withFallback(other: RouterConfig): RouterConfig = other match {
     case RemoteRouterConfig(local: RemoteRouterConfig, nodes) ⇒ throw new IllegalStateException(
       "RemoteRouterConfig is not allowed to wrap a RemoteRouterConfig")
-    case RemoteRouterConfig(local: RouterConfig2 with CreateChildRoutee, nodes) ⇒
-      // FIXME #3549 this is a complete mess
-      copy(local = this.local.withFallback(local).asInstanceOf[RouterConfig2 with CreateChildRoutee])
-    case _ ⇒ copy(local = this.local.withFallback(other).asInstanceOf[RouterConfig2 with CreateChildRoutee])
+    case RemoteRouterConfig(local: Pool, nodes) ⇒
+      // FIXME #3549 is this always correct?
+      copy(local = this.local.withFallback(local).asInstanceOf[Pool])
+    case _ ⇒ copy(local = this.local.withFallback(other).asInstanceOf[Pool])
   }
 
 }

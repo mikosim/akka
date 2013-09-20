@@ -104,7 +104,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
       val resizer = DefaultResizer(
         lowerBound = 2,
         upperBound = 3)
-      val router = system.actorOf(Props[TestActor].withRouter(RoundRobinRouter(
+      val router = system.actorOf(Props[TestActor].withRouter(RoundRobinPool(
         nrOfInstances = 0, resizer2 = Some(resizer))))
 
       router ! latch
@@ -150,7 +150,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
             Thread.sleep(d.dilated.toMillis); sender ! "done"
           case "echo" ⇒ sender ! "reply"
         }
-      }).withRouter(RoundRobinRouter(nrOfInstances = 0, resizer2 = Some(resizer))))
+      }).withRouter(RoundRobinPool(nrOfInstances = 0, resizer2 = Some(resizer))))
 
       // first message should create the minimum number of routees
       router ! "echo"
@@ -193,7 +193,7 @@ class ResizerSpec extends AkkaSpec(ResizerSpec.config) with DefaultTimeout with 
           case n: Int if n <= 0 ⇒ // done
           case n: Int           ⇒ Thread.sleep((n millis).dilated.toMillis)
         }
-      }).withRouter(RoundRobinRouter(nrOfInstances = 0, resizer2 = Some(resizer))))
+      }).withRouter(RoundRobinPool(nrOfInstances = 0, resizer2 = Some(resizer))))
 
       // put some pressure on the router
       for (m ← 0 until 15) {

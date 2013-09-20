@@ -3,17 +3,13 @@
  */
 package akka.routing2
 
-import language.postfixOps
-
-import java.util.concurrent.atomic.AtomicInteger
-import org.junit.runner.RunWith
-import akka.actor.{ Props, Deploy, Actor, ActorRef }
-import akka.ConfigurationException
 import scala.concurrent.Await
-import akka.pattern.{ ask, gracefulStop }
-import akka.testkit.{ TestLatch, ImplicitSender, DefaultTimeout, AkkaSpec }
 import scala.concurrent.duration._
+import akka.ConfigurationException
+import akka.actor.{ Props, Deploy, Actor, ActorRef }
 import akka.actor.UnstartedCell
+import akka.testkit.{ ImplicitSender, DefaultTimeout, AkkaSpec }
+import akka.pattern.gracefulStop
 
 object ConfiguredLocalRoutingSpec {
   val config = """
@@ -30,6 +26,11 @@ object ConfiguredLocalRoutingSpec {
           /config {
             router = random
             nr-of-instances = 4
+            routing2 = on # FIXME #3549 temporary
+          }
+          /paths {
+            router = random
+            routees.paths = ["/user/service1", "/user/service2"]
             routing2 = on # FIXME #3549 temporary
           }
           /weird {
@@ -66,8 +67,8 @@ class ConfiguredLocalRoutingSpec extends AkkaSpec(ConfiguredLocalRoutingSpec.con
         def receive = {
           case "get" ⇒ sender ! context.props
         }
-      }).withRouter(RoundRobinRouter(12)), "someOther")
-      routerConfig(actor) must be === RoundRobinRouter(12)
+      }).withRouter(RoundRobinPool(12)), "someOther")
+      routerConfig(actor) must be === RoundRobinPool(12)
       Await.result(gracefulStop(actor, 3 seconds), 3 seconds)
     }
 
@@ -76,8 +77,18 @@ class ConfiguredLocalRoutingSpec extends AkkaSpec(ConfiguredLocalRoutingSpec.con
         def receive = {
           case "get" ⇒ sender ! context.props
         }
-      }).withRouter(RoundRobinRouter(12)), "config")
-      routerConfig(actor) must be === RandomRouter(4)
+      }).withRouter(RoundRobinPool(12)), "config")
+      routerConfig(actor) must be === RandomPool(4)
+      Await.result(gracefulStop(actor, 3 seconds), 3 seconds)
+    }
+
+    "use routee.paths from config" in {
+      val actor = system.actorOf(Props(new Actor {
+        def receive = {
+          case "get" ⇒ sender ! context.props
+        }
+      }).withRouter(RandomPool(12)), "paths")
+      routerConfig(actor) must be === RandomNozzle(List("/user/service1", "/user/service2"))
       Await.result(gracefulStop(actor, 3 seconds), 3 seconds)
     }
 
@@ -86,8 +97,8 @@ class ConfiguredLocalRoutingSpec extends AkkaSpec(ConfiguredLocalRoutingSpec.con
         def receive = {
           case "get" ⇒ sender ! context.props
         }
-      }).withRouter(FromConfig).withDeploy(Deploy(routerConfig = RoundRobinRouter(12))), "someOther")
-      routerConfig(actor) must be === RoundRobinRouter(12)
+      }).withRouter(FromConfig).withDeploy(Deploy(routerConfig = RoundRobinPool(12))), "someOther")
+      routerConfig(actor) must be === RoundRobinPool(12)
       Await.result(gracefulStop(actor, 3 seconds), 3 seconds)
     }
 
@@ -96,8 +107,8 @@ class ConfiguredLocalRoutingSpec extends AkkaSpec(ConfiguredLocalRoutingSpec.con
         def receive = {
           case "get" ⇒ sender ! context.props
         }
-      }).withRouter(FromConfig).withDeploy(Deploy(routerConfig = RoundRobinRouter(12))), "config")
-      routerConfig(actor) must be === RandomRouter(4)
+      }).withRouter(FromConfig).withDeploy(Deploy(routerConfig = RoundRobinPool(12))), "config")
+      routerConfig(actor) must be === RandomPool(4)
       Await.result(gracefulStop(actor, 3 seconds), 3 seconds)
     }
 
@@ -120,172 +131,4 @@ class ConfiguredLocalRoutingSpec extends AkkaSpec(ConfiguredLocalRoutingSpec.con
 
   }
 
-  "round robin router" must {
-
-    "be able to shut down its instance" in {
-      val helloLatch = new TestLatch(5)
-      val stopLatch = new TestLatch(5)
-
-      val actor = system.actorOf(Props(new Actor {
-        def receive = {
-          case "hello" ⇒ helloLatch.countDown()
-        }
-
-        override def postStop() {
-          stopLatch.countDown()
-        }
-      }).withRouter(RoundRobinRouter(5)), "round-robin-shutdown")
-
-      actor ! "hello"
-      actor ! "hello"
-      actor ! "hello"
-      actor ! "hello"
-      actor ! "hello"
-      Await.ready(helloLatch, 5 seconds)
-
-      system.stop(actor)
-      Await.ready(stopLatch, 5 seconds)
-    }
-
-    "deliver messages in a round robin fashion" in {
-      val connectionCount = 10
-      val iterationCount = 10
-      val doneLatch = new TestLatch(connectionCount)
-
-      val counter = new AtomicInteger
-      var replies = Map.empty[Int, Int]
-      for (i ← 0 until connectionCount) {
-        replies += i -> 0
-      }
-
-      val actor = system.actorOf(Props(new Actor {
-        lazy val id = counter.getAndIncrement()
-        def receive = {
-          case "hit" ⇒ sender ! id
-          case "end" ⇒ doneLatch.countDown()
-        }
-      }).withRouter(RoundRobinRouter(connectionCount)), "round-robin")
-
-      for (i ← 0 until iterationCount) {
-        for (k ← 0 until connectionCount) {
-          val id = Await.result((actor ? "hit").mapTo[Int], timeout.duration)
-          replies = replies + (id -> (replies(id) + 1))
-        }
-      }
-
-      counter.get must be(connectionCount)
-
-      actor ! akka.routing.Broadcast("end")
-      Await.ready(doneLatch, 5 seconds)
-
-      replies.values foreach { _ must be(iterationCount) }
-    }
-
-    "deliver a broadcast message using the !" in {
-      val helloLatch = new TestLatch(5)
-      val stopLatch = new TestLatch(5)
-
-      val actor = system.actorOf(Props(new Actor {
-        def receive = {
-          case "hello" ⇒ helloLatch.countDown()
-        }
-
-        override def postStop() {
-          stopLatch.countDown()
-        }
-      }).withRouter(RoundRobinRouter(5)), "round-robin-broadcast")
-
-      actor ! akka.routing.Broadcast("hello")
-      Await.ready(helloLatch, 5 seconds)
-
-      system.stop(actor)
-      Await.ready(stopLatch, 5 seconds)
-    }
-  }
-
-  "random router" must {
-
-    "be able to shut down its instance" in {
-      val stopLatch = new TestLatch(7)
-
-      val actor = system.actorOf(Props(new Actor {
-        def receive = {
-          case "hello" ⇒ sender ! "world"
-        }
-
-        override def postStop() {
-          stopLatch.countDown()
-        }
-      }).withRouter(RandomRouter(7)), "random-shutdown")
-
-      actor ! "hello"
-      actor ! "hello"
-      actor ! "hello"
-      actor ! "hello"
-      actor ! "hello"
-
-      within(2 seconds) {
-        for (i ← 1 to 5) expectMsg("world")
-      }
-
-      system.stop(actor)
-      Await.ready(stopLatch, 5 seconds)
-    }
-
-    "deliver messages in a random fashion" in {
-      val connectionCount = 10
-      val iterationCount = 100
-      val doneLatch = new TestLatch(connectionCount)
-
-      val counter = new AtomicInteger
-      var replies = Map.empty[Int, Int]
-      for (i ← 0 until connectionCount) {
-        replies = replies + (i -> 0)
-      }
-
-      val actor = system.actorOf(Props(new Actor {
-        lazy val id = counter.getAndIncrement()
-        def receive = {
-          case "hit" ⇒ sender ! id
-          case "end" ⇒ doneLatch.countDown()
-        }
-      }).withRouter(RandomRouter(connectionCount)), "random")
-
-      for (i ← 0 until iterationCount) {
-        for (k ← 0 until connectionCount) {
-          val id = Await.result((actor ? "hit").mapTo[Int], timeout.duration)
-          replies = replies + (id -> (replies(id) + 1))
-        }
-      }
-
-      counter.get must be(connectionCount)
-
-      actor ! akka.routing.Broadcast("end")
-      Await.ready(doneLatch, 5 seconds)
-
-      replies.values foreach { _ must be > (0) }
-      replies.values.sum must be === iterationCount * connectionCount
-    }
-
-    "deliver a broadcast message using the !" in {
-      val helloLatch = new TestLatch(6)
-      val stopLatch = new TestLatch(6)
-
-      val actor = system.actorOf(Props(new Actor {
-        def receive = {
-          case "hello" ⇒ helloLatch.countDown()
-        }
-
-        override def postStop() {
-          stopLatch.countDown()
-        }
-      }).withRouter(RandomRouter(6)), "random-broadcast")
-
-      actor ! akka.routing.Broadcast("hello")
-      Await.ready(helloLatch, 5 seconds)
-
-      system.stop(actor)
-      Await.ready(stopLatch, 5 seconds)
-    }
-  }
 }

@@ -15,6 +15,7 @@ import akka.ConfigurationException
 import akka.actor.ActorPath
 import akka.actor.Actor
 import akka.routing.RouterConfig
+import akka.actor.ActorSelection
 
 trait RoutingLogic {
   def select(message: Any, routees: immutable.IndexedSeq[Routee]): Routee
@@ -27,6 +28,11 @@ trait Routee {
 case class ActorRefRoutee(ref: ActorRef) extends Routee {
   override def send(message: Any, sender: ActorRef): Unit =
     ref.tell(message, sender)
+}
+
+case class ActorSelectionRoutee(selection: ActorSelection) extends Routee {
+  override def send(message: Any, sender: ActorRef): Unit =
+    selection.tell(message, sender)
 }
 
 object NoRoutee extends Routee {
@@ -56,24 +62,80 @@ final class Router(val routees: immutable.IndexedSeq[Routee], val logic: Routing
  *
  * Used to override unset configuration in a router.
  */
-private[akka] trait OverrideUnsetConfig[T <: RouterConfig2 with Resizable] extends RouterConfig2 with CreateChildRoutee with Resizable {
+private[akka] trait NozzleOverrideUnsetConfig[T <: Nozzle] extends Nozzle {
+
+  final def overrideUnsetConfig(other: RouterConfig): RouterConfig =
+    if (other == NoRouter) this // NoRouter is the default, hence “neutral”
+    else if ((this.supervisorStrategy eq RouterConfig2.defaultSupervisorStrategy)
+      && (other.supervisorStrategy ne RouterConfig2.defaultSupervisorStrategy))
+      this.withSupervisorStrategy(other.supervisorStrategy).asInstanceOf[NozzleOverrideUnsetConfig[T]]
+    else this
+
+  def withSupervisorStrategy(strategy: SupervisorStrategy): T
+}
+
+/**
+ * INTERNAL API
+ *
+ * Used to override unset configuration in a router.
+ */
+private[akka] trait PoolOverrideUnsetConfig[T <: Pool] extends Pool {
 
   final def overrideUnsetConfig(other: RouterConfig): RouterConfig =
     if (other == NoRouter) this // NoRouter is the default, hence “neutral”
     else {
-      val wssConf: OverrideUnsetConfig[T] =
+      val wssConf: PoolOverrideUnsetConfig[T] =
         if ((this.supervisorStrategy eq RouterConfig2.defaultSupervisorStrategy)
           && (other.supervisorStrategy ne RouterConfig2.defaultSupervisorStrategy))
-          this.withSupervisorStrategy(other.supervisorStrategy).asInstanceOf[OverrideUnsetConfig[T]]
+          this.withSupervisorStrategy(other.supervisorStrategy).asInstanceOf[PoolOverrideUnsetConfig[T]]
         else this
-      // FIXME #3549 cleanup  
-      if (wssConf.resizer2.isEmpty && other.isInstanceOf[Resizable] && other.asInstanceOf[Resizable].resizer2.isDefined) wssConf.withResizer(other.asInstanceOf[Resizable].resizer2.get)
-      else wssConf
+
+      other match {
+        case r: Pool if wssConf.resizer2.isEmpty && r.resizer2.isDefined ⇒
+          wssConf.withResizer(r.resizer2.get)
+        case _ ⇒ wssConf
+      }
     }
 
   def withSupervisorStrategy(strategy: SupervisorStrategy): T
 
   def withResizer(resizer: Resizer): T
+}
+
+trait Nozzle extends RouterConfig2 {
+
+  def paths: immutable.Iterable[String]
+
+  /**
+   * INTERNAL API
+   */
+  private[akka] def routeeFor(path: String, context: ActorContext): Routee =
+    ActorSelectionRoutee(context.actorSelection(path))
+}
+
+trait Pool extends RouterConfig2 {
+  /**
+   * Initial number of routee instances
+   */
+  def nrOfInstances: Int
+
+  /**
+   * INTERNAL API
+   */
+  private[akka] def newRoutee(routeeProps: Props, context: ActorContext): Routee =
+    ActorRefRoutee(context.actorOf(routeeProps))
+
+  // FIXME #3549 signature clash with old resizer method
+  def resizer2: Option[Resizer]
+
+  override def createActor(): Actor =
+    resizer2 match {
+      case Some(r) ⇒
+        new RouterActorWithResizer {
+          override def supervisorStrategy: SupervisorStrategy = super.supervisorStrategy
+        }
+      case _ ⇒ super.createActor()
+    }
 }
 
 /**

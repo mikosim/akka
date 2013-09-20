@@ -250,35 +250,21 @@ case class DefaultResizer(
 
 }
 
-trait Resizable extends RouterConfig2 { this: CreateChildRoutee ⇒
-  // FIXME #3549 signature clash with old resizer method
-  def resizer2: Option[Resizer]
-
-  override def createActor(): Actor =
-    resizer2 match {
-      case Some(r) ⇒
-        new RouterActorWithResizer {
-          override def supervisorStrategy: SupervisorStrategy = super.supervisorStrategy
-        }
-      case _ ⇒ super.createActor()
-    }
-
-}
-
 /**
  * INTERNAL API
  */
-private[akka] final class ResizableRoutedActorCell(
+private[akka] final class ResizablePoolCell(
   _system: ActorSystemImpl,
   _ref: InternalActorRef,
   _routerProps: Props,
   _routerDispatcher: MessageDispatcher,
   _routeeProps: Props,
   _supervisor: InternalActorRef,
-  val resizer: Resizer)
+  val pool: Pool)
   extends RoutedActorCell(_system, _ref, _routerProps, _routerDispatcher, _routeeProps, _supervisor) {
 
-  private val childFactory = _routerProps.routerConfig.asInstanceOf[CreateChildRoutee]
+  require(pool.resizer2.isDefined, "RouterConfig must be a Pool with defined resizer")
+  val resizer = pool.resizer2.get
   private val resizeInProgress = new AtomicBoolean
   private val resizeCounter = new AtomicLong
 
@@ -297,14 +283,11 @@ private[akka] final class ResizableRoutedActorCell(
     super.sendMessage(envelope)
   }
 
-  println("# Resizer active")
-
   private[akka] def resize(initial: Boolean): Unit = {
     if (resizeInProgress.get || initial) try {
       val requestedCapacity = resizer.resize(router.routees)
-      println("# resize: " + resizeCounter.get + " => " + router.routees.size + " + " + requestedCapacity)
       if (requestedCapacity > 0) {
-        val newRoutees = immutable.IndexedSeq.fill(requestedCapacity)(childFactory.newRoutee(routeeProps, this))
+        val newRoutees = immutable.IndexedSeq.fill(requestedCapacity)(pool.newRoutee(routeeProps, this))
         // FIXME #3549 watch newRoutees
         _router = _router.withRoutees(_router.routees ++ newRoutees)
       } else if (requestedCapacity < 0) {
@@ -352,7 +335,7 @@ private[akka] class RouterActorWithResizer extends RouterActor {
   import RouterActorWithResizer._
 
   val resizerCell = context match {
-    case x: ResizableRoutedActorCell ⇒ x
+    case x: ResizablePoolCell ⇒ x
     case _ ⇒
       throw ActorInitializationException("Router actor can only be used in RoutedActorRef, not in " + context.getClass)
   }

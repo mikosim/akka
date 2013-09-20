@@ -57,16 +57,28 @@ private[akka] class RoutedActorCell(
   override def start(): this.type = {
     // create the initial routees before scheduling the Router actor
     _router = routerConfig match {
-      case c: CreateChildRoutee ⇒
+      case pool: Pool ⇒
         val r = routerConfig.createRouter()
-        val routees = immutable.IndexedSeq.fill(c.nrOfInstances)(c.newRoutee(routeeProps, this))
-        r.withRoutees(routees)
+        if (pool.nrOfInstances > 0)
+          r.withRoutees(Vector.fill(pool.nrOfInstances)(pool.newRoutee(routeeProps, this)))
+        else r
+      case nozzle: Nozzle ⇒
+        val r = routerConfig.createRouter()
+        val paths = nozzle.paths
+        if (paths.nonEmpty) {
+          val routees: Vector[Routee] = paths.map(p ⇒ nozzle.routeeFor(p, this))(collection.breakOut)
+          r.withRoutees(routees)
+        } else r
       case _ ⇒ routerConfig.createRouter()
     }
     preSuperStart()
     super.start()
   }
 
+  /**
+   * Called when `router` is initalized but before `super.start()` to
+   * be able to do extra initialization in subclass.
+   */
   protected def preSuperStart(): Unit = ()
 
   /*
@@ -123,12 +135,3 @@ private[akka] class RouterActor extends Actor {
   }
 }
 
-trait CreateChildRoutee {
-  /**
-   * Initial number of routee instances
-   */
-  def nrOfInstances: Int
-
-  def newRoutee(routeeProps: Props, context: ActorContext): Routee =
-    ActorRefRoutee(context.actorOf(routeeProps))
-}

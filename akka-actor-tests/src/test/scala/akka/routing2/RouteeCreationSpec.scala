@@ -21,7 +21,7 @@ class RouteeCreationSpec extends AkkaSpec {
       system.actorOf(Props(new Actor {
         testActor ! system.actorFor(self.path)
         def receive = Actor.emptyBehavior
-      }).withRouter(RoundRobinRouter(N)))
+      }).withRouter(RoundRobinPool(N)))
       for (i ← 1 to N) {
         expectMsgType[ActorRef] match {
           case _: LocalActorRef ⇒ // fine
@@ -37,7 +37,7 @@ class RouteeCreationSpec extends AkkaSpec {
         def receive = {
           case "one" ⇒ testActor forward "two"
         }
-      }).withRouter(RoundRobinRouter(N)))
+      }).withRouter(RoundRobinPool(N)))
       val gotit = receiveWhile(messages = N) {
         case "two" ⇒ lastSender.toString
       }

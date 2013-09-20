@@ -11,6 +11,7 @@ import akka.dispatch.Dispatchers
 import com.typesafe.config.Config
 import akka.routing.RouterConfig
 import akka.actor.SupervisorStrategy
+import akka.japi.Util.immutableSeq
 
 object RoundRobinRoutingLogic {
   def apply(): RoundRobinRoutingLogic = new RoundRobinRoutingLogic
@@ -25,11 +26,11 @@ class RoundRobinRoutingLogic extends RoutingLogic {
 
 }
 
-final case class RoundRobinRouter(
+final case class RoundRobinPool(
   override val nrOfInstances: Int, override val resizer2: Option[Resizer] = None,
   override val supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy,
   override val routerDispatcher: String = Dispatchers.DefaultDispatcherId)
-  extends RouterConfig2 with CreateChildRoutee with Resizable with OverrideUnsetConfig[RoundRobinRouter] {
+  extends Pool with PoolOverrideUnsetConfig[RoundRobinPool] {
 
   def this(config: Config) =
     this(
@@ -40,20 +41,46 @@ final case class RoundRobinRouter(
     new Router(Vector.empty, RoundRobinRoutingLogic())
 
   /**
+   * Setting the supervisor strategy to be used for the “head” Router actor.
+   */
+  def withSupervisorStrategy(strategy: SupervisorStrategy): RoundRobinPool = copy(supervisorStrategy = strategy)
+
+  /**
+   * Setting the resizer to be used.
+   */
+  def withResizer(resizer: Resizer): RoundRobinPool = copy(resizer2 = Some(resizer))
+
+  /**
    * Uses the resizer and/or the supervisor strategy of the given Routerconfig
    * if this RouterConfig doesn't have one, i.e. the resizer defined in code is used if
    * resizer was not defined in config.
    */
   override def withFallback(other: RouterConfig): RouterConfig = this.overrideUnsetConfig(other)
 
+}
+
+final case class RoundRobinNozzle(
+  paths: immutable.Iterable[String],
+  override val supervisorStrategy: SupervisorStrategy = RouterConfig2.defaultSupervisorStrategy,
+  override val routerDispatcher: String = Dispatchers.DefaultDispatcherId)
+  extends Nozzle with NozzleOverrideUnsetConfig[RoundRobinNozzle] {
+
+  def this(config: Config) =
+    this(paths = immutableSeq(config.getStringList("routees.paths")))
+
+  override def createRouter(): Router =
+    new Router(Vector.empty, RoundRobinRoutingLogic())
+
   /**
    * Setting the supervisor strategy to be used for the “head” Router actor.
    */
-  def withSupervisorStrategy(strategy: SupervisorStrategy): RoundRobinRouter = copy(supervisorStrategy = strategy)
+  override def withSupervisorStrategy(strategy: SupervisorStrategy): RoundRobinNozzle = copy(supervisorStrategy = strategy)
 
   /**
-   * Setting the resizer to be used.
+   * Uses the resizer and/or the supervisor strategy of the given Routerconfig
+   * if this RouterConfig doesn't have one, i.e. the resizer defined in code is used if
+   * resizer was not defined in config.
    */
-  def withResizer(resizer: Resizer): RoundRobinRouter = copy(resizer2 = Some(resizer))
+  override def withFallback(other: RouterConfig): RouterConfig = this.overrideUnsetConfig(other)
 
 }

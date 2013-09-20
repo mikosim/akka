@@ -199,7 +199,12 @@ private[akka] class Deployer(val settings: ActorSystem.Settings, val dynamicAcce
         resizerEnabled.withFallback(deployment)
       else deployment
 
-    val fqn = routerTypeMapping.getOrElse(routerType, routerType)
+    val fqn = routerTypeMapping.getOrElse(routerType,
+      if (deployment.getStringList("routees.paths").isEmpty())
+        routerTypeMapping.getOrElse(routerType + "-pool", routerType)
+      else
+        routerTypeMapping.getOrElse(routerType + "-nozzle", routerType))
+
     val args = List(classOf[Config] -> deployment2)
     dynamicAccess.createInstanceFor[RouterConfig](fqn, args).recover({
       case exception ⇒ throw new IllegalArgumentException(

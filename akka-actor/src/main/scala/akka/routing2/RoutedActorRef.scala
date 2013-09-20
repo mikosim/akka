@@ -41,8 +41,8 @@ private[akka] class RoutedActorRef(
 
   override def newCell(old: UnstartedCell): Cell = {
     val cell = props.routerConfig match {
-      case r: Resizable if r.resizer2.isDefined ⇒
-        new ResizableRoutedActorCell(system, this, props, dispatcher, _routeeProps, supervisor, r.resizer2.get)
+      case pool: Pool if pool.resizer2.isDefined ⇒
+        new ResizablePoolCell(system, this, props, dispatcher, _routeeProps, supervisor, pool)
       case _ ⇒
         new RoutedActorCell(system, this, props, dispatcher, _routeeProps, supervisor)
     }
