@@ -73,8 +73,6 @@ private[akka] class RoutedActorCell(
     if (stopChild) routees foreach stopIfChild
   }
 
-  // FIXME #3549 stopRouterWhenAllRouteesRemoved
-
   private def watch(routee: Routee): Unit = routee match {
     case ActorRefRoutee(ref) ⇒ watch(ref)
     case _                   ⇒
@@ -152,6 +150,8 @@ private[akka] class RouterActor extends Actor {
   def receive = {
     case Terminated(child) ⇒
       cell.removeRoutee(ActorRefRoutee(child), stopChild = false)
+      if (cell.router.routees.isEmpty && cell.routerConfig.stopRouterWhenAllRouteesRemoved)
+        context.stop(self)
     case CurrentRoutees ⇒
       sender ! RouterRoutees(cell.router.routees)
   }

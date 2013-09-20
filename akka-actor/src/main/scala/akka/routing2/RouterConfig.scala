@@ -25,32 +25,67 @@ object RouterConfig2 {
 }
 
 // FIXME #3549 this will be the new RouterConfig
+/**
+ * This trait represents a router factory: it produces the actual router actor
+ * and creates the routing table (a function which determines the recipients
+ * for each message which is to be dispatched). The resulting RoutedActorRef
+ * optimizes the sending of the message so that it does NOT go through the
+ * router’s mailbox unless the route returns an empty recipient set.
+ *
+ * '''Caution:''' This means
+ * that the route function is evaluated concurrently without protection by
+ * the RoutedActorRef: either provide a reentrant (i.e. pure) implementation or
+ * do the locking yourself!
+ *
+ * '''Caution:''' Please note that the [[akka.routing.Router]] which needs to
+ * be returned by `createActor()` should not send a message to itself in its
+ * constructor or `preStart()` or publish its self reference from there: if
+ * someone tries sending a message to that reference before the constructor of
+ * RoutedActorRef has returned, there will be a `NullPointerException`!
+ */
 trait RouterConfig2 extends RouterConfig {
 
+  /**
+   * Create the actual router, responsible for routing messages to routees.
+   */
   def createRouter(): Router
 
   // FIXME #3549 change signature to `createRouterActor: RouterActor`
+  /**
+   * The router "head" actor.
+   */
   override def createActor(): Actor = new RouterActor {
     override def supervisorStrategy: SupervisorStrategy = RouterConfig2.this.supervisorStrategy
   }
 
   /**
-   * Is the message handled by the router actor
+   * Is the message handled by the router head actor
    */
   def isManagementMessage(msg: Any): Boolean = msg match {
     case _: AutoReceivedMessage | _: Terminated | _: RouterManagementMesssage ⇒ true
     case _ ⇒ false
   }
 
+  /*
+   * Specify that this router should stop itself when all routees have terminated (been removed).
+   * By Default it is `true`, unless a `resizer` is used.
+   */
+  override def stopRouterWhenAllRouteesRemoved: Boolean = true
+
+  /**
+   * Overridable merge strategy, by default completely prefers “this” (i.e. no merge).
+   */
   override def withFallback(other: RouterConfig): RouterConfig = this
 
+  /**
+   * Check that everything is there which is needed. Called in constructor of RoutedActorRef to fail early.
+   */
   override def verifyConfig(path: ActorPath): Unit = ()
 
   // FIXME #3549 remove these 
   override def createRoute(routeeProvider: RouteeProvider): Route = ???
   override def createRouteeProvider(context: ActorContext, routeeProps: Props): RouteeProvider = ???
   override def resizer: Option[akka.routing.Resizer] = ???
-  override def stopRouterWhenAllRouteesRemoved: Boolean = ???
 
 }
 
@@ -123,7 +158,19 @@ trait Pool extends RouterConfig2 {
     ActorRefRoutee(context.actorOf(routeeProps))
 
   // FIXME #3549 signature clash with old resizer method
+  /**
+   * Pool with dynamically resizable number of routees return the [[akka.routing.Resizer]]
+   * to use. The resizer is invoked once when the router is created, before any messages can
+   * be sent to it. Resize is also triggered when messages are sent to the routees, and the
+   * resizer is invoked asynchronously, i.e. not necessarily before the message has been sent.
+   */
   def resizer2: Option[Resizer]
+
+  /*
+   * Specify that this router should stop itself when all routees have terminated (been removed).
+   * By Default it is `true`, unless a `resizer` is used.
+   */
+  override def stopRouterWhenAllRouteesRemoved: Boolean = resizer2.isEmpty
 
   override def createActor(): Actor =
     resizer2 match {
