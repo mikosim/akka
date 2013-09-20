@@ -34,8 +34,7 @@ final case class RandomPool(
       nrOfInstances = config.getInt("nr-of-instances"),
       resizer2 = DefaultResizer.fromConfig(config))
 
-  override def createRouter(): Router =
-    new Router(Vector.empty, RandomRoutingLogic())
+  override def createRouter(): Router = new Router(RandomRoutingLogic())
 
   /**
    * Setting the supervisor strategy to be used for the “head” Router actor.
@@ -57,8 +56,7 @@ final case class RandomNozzle(
   def this(config: Config) =
     this(paths = immutableSeq(config.getStringList("routees.paths")))
 
-  override def createRouter(): Router =
-    new Router(Vector.empty, RandomRoutingLogic())
+  override def createRouter(): Router = new Router(RandomRoutingLogic())
 
   /**
    * Setting the supervisor strategy to be used for the “head” Router actor.

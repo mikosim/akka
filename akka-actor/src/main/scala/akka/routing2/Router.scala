@@ -26,7 +26,7 @@ case class ActorSelectionRoutee(selection: ActorSelection) extends Routee {
 }
 
 object NoRoutee extends Routee {
-  // TODO #3549 not deadLetters any more?
+  // FIXME #3549 not deadLetters any more?
   override def send(message: Any, sender: ActorRef): Unit = ()
 }
 
@@ -35,7 +35,9 @@ case class SeveralRoutees(routees: immutable.IndexedSeq[Routee]) extends Routee 
     routees.foreach(_.send(message, sender))
 }
 
-final class Router(val routees: immutable.IndexedSeq[Routee], val logic: RoutingLogic) {
+final case class Router(val logic: RoutingLogic, val routees: immutable.IndexedSeq[Routee] = Vector.empty) {
+
+  // FIXME #3549 Java api
 
   def route(message: Any, sender: ActorRef): Unit =
     message match {
@@ -43,13 +45,19 @@ final class Router(val routees: immutable.IndexedSeq[Routee], val logic: Routing
       case msg                         ⇒ logic.select(msg, routees).send(msg, sender)
     }
 
-  def withRoutees(rs: immutable.IndexedSeq[Routee]): Router = new Router(rs, logic)
+  def withRoutees(rs: immutable.IndexedSeq[Routee]): Router = copy(routees = rs)
 
-  def addRoutee(routee: Routee): Router =
-    new Router(routees :+ routee, logic)
+  def addRoutee(routee: Routee): Router = copy(routees = routees :+ routee)
 
-  def removeRoutee(routee: Routee): Router =
-    new Router(routees = routees.filterNot(_ == routee), logic)
+  def addRoutee(ref: ActorRef): Router = addRoutee(ActorRefRoutee(ref))
+
+  def addRoutee(sel: ActorSelection): Router = addRoutee(ActorSelectionRoutee(sel))
+
+  def removeRoutee(routee: Routee): Router = copy(routees = routees.filterNot(_ == routee))
+
+  def removeRoutee(ref: ActorRef): Router = removeRoutee(ActorRefRoutee(ref))
+
+  def removeRoutee(sel: ActorSelection): Router = removeRoutee(ActorSelectionRoutee(sel))
 
 }
 

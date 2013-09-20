@@ -37,8 +37,7 @@ final case class RoundRobinPool(
       nrOfInstances = config.getInt("nr-of-instances"),
       resizer2 = DefaultResizer.fromConfig(config))
 
-  override def createRouter(): Router =
-    new Router(Vector.empty, RoundRobinRoutingLogic())
+  override def createRouter(): Router = new Router(RoundRobinRoutingLogic())
 
   /**
    * Setting the supervisor strategy to be used for the “head” Router actor.
@@ -68,8 +67,7 @@ final case class RoundRobinNozzle(
   def this(config: Config) =
     this(paths = immutableSeq(config.getStringList("routees.paths")))
 
-  override def createRouter(): Router =
-    new Router(Vector.empty, RoundRobinRoutingLogic())
+  override def createRouter(): Router = new Router(RoundRobinRoutingLogic())
 
   /**
    * Setting the supervisor strategy to be used for the “head” Router actor.
